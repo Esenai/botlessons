@@ -9,15 +9,15 @@ from load_all import bot, dp, db
 
 class DBCommands:
     pool: Connection = db
-    ADD_NEW_USER_REFERRAL = "INSERT INTO users(chat_id, username, full_name, referral) " \
-                            "VALUES ($1, $2, $3, $4) RETURNING id"
     ADD_NEW_USER = "INSERT INTO users(chat_id, username, full_name) VALUES ($1, $2, $3) RETURNING id"
+    ADD_NEW_USER_REFERRAL = "INSERT INTO users(chat_id, username, full_name, referral)"\
+                            "VALUES ($1, $2, $3, $4) RETURNING id"
     COUNT_USERS = "SELECT COUNT(*) FROM users"
     GET_ID = "SELECT id FROM users WHERE chat_id = $1"
-    CHECK_REFERRALS = "SELECT chat_id FROM users WHERE referral=" \
+    CHECK_REFERRALS = "SELECT chat_id FROM users WHERE referral="\
                       "(SELECT id FROM users WHERE chat_id=$1)"
-    CHECK_BALANCE = "SELECT balance FROM users WHERE chat_id = $1"
-    ADD_MONEY = "UPDATE users SET balance=balance+$1 WHERE chat_id = $2"
+    CHECK_BALANCE = "SELECT balance FROM users WHERE chat_Id=$1"
+    ADD_MONEY = "UPDATE users SET balance=balance+$1 WHERE chat_id=$2"
 
     async def add_new_user(self, referral=None):
         user = types.User.get_current()
@@ -52,49 +52,52 @@ class DBCommands:
         user_id = types.User.get_current().id
         command = self.CHECK_REFERRALS
         rows = await self.pool.fetch(command, user_id)
-        return ", ".join([
-            f"{num + 1}. " + (await bot.get_chat(user["chat_id"])).get_mention(as_html=True)
-            for num, user in enumerate(rows)
-        ])
+        text = ""
+        for num, row in enumerate(rows):
+            chat = await bot.get_chat(row["chat_id"])
+            user_link = chat.get_mention(as_html=True)
+            text += str(num + 1) + ". " + user_link
+        return text
 
     async def check_balance(self):
         command = self.CHECK_BALANCE
-        user_id = types.User.get_current().id
+        user_id = types.User.get_current()
         return await self.pool.fetchval(command, user_id)
 
     async def add_money(self, money):
         command = self.ADD_MONEY
-        user_id = types.User.get_current().id
+        user_id = types.User.get_current()
         return await self.pool.fetchval(command, money, user_id)
 
 
-db = DBCommands()
+database = DBCommands()
 
 
 @dp.message_handler(commands=["start"])
 async def register_user(message: types.Message):
     chat_id = message.from_user.id
     referral = message.get_args()
-    id = await db.add_new_user(referral=referral)
-    count_users = await db.count_users()
-
+    id = await database.add_new_user(referral=referral)
+    count_users = await database.count_users()
     text = ""
     if not id:
-        id = await db.get_id()
+        id = await database.get_id()
     else:
-        text += "Записал в базу! "
-
-    bot_username = (await bot.me).username
-    bot_link = f"https://t.me/{bot_username}?start={id}"
-    balance = await db.check_balance()
+        text = "Записал в базу."
+    bot_username = (await bot.get_me()).username
+    id_referral = id
+    bot_link = "https://t.me/{bot_username}?start={id_referral}".format(
+        bot_username=bot_username,
+        id_referral=id_referral
+    )
+    balance = await database.check_balance()
     text += f"""
 Сейчас в базе {count_users} человек!
 
 Ваша реферальная ссылка: {bot_link}
-Проверить рефералов можно по команде: /referrals
+Проверить реферралов можно по команде: /referrals
 
-Ваш баланс: {balance} монет.
-
+Ваш баланс: {balance} монет
 Добавить монет: /add_money
 """
 
@@ -103,20 +106,16 @@ async def register_user(message: types.Message):
 
 @dp.message_handler(commands=["referrals"])
 async def check_referrals(message: types.Message):
-    referrals = await db.check_referrals()
-    text = f"Ваши рефералы:\n{referrals}"
-
+    referrals = await database.check_referrals()
+    text = "Ваши рефералы:\n" + referrals
     await message.answer(text)
 
 
 @dp.message_handler(commands=["add_money"])
 async def add_money(message: types.Message):
     random_amount = random.randint(1, 100)
-    await db.add_money(random_amount)
-    balance = await db.check_balance()
-
-    text = f"""
-Вам было добавлено {random_amount} монет.
-Теперь ваш баланс: {balance}
-    """
+    await database.add_money(random_amount)
+    balance = await database.check_balance()
+    text = "Вам было добавлено {money} монет.\nТеперь ваш баланс: {balance}".format(money=random_amount,
+                                                                                    balance=balance)
     await message.answer(text)
